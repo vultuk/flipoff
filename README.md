@@ -62,7 +62,7 @@ The Python server keeps the current remote message and display configuration in 
 
 The board starts at 18 columns by 5 rows. `message` payloads wrap on whole words, then the wrapped block is centered vertically while each line is centered horizontally by the board renderer.
 
-Admin changes are saved under `~/.flipoff/`, so board size, plugin settings, screens, and API override duration survive a restart.
+Admin changes are saved under `~/.flipoff/`, so board size, screen timing, plugin settings, screens, and API override duration survive a restart.
 
 ## File Structure
 
@@ -106,6 +106,7 @@ Edit `js/constants.js` to change:
 
 Use `/admin` for the runtime configuration that the server actually serves:
 - board columns and rows
+- how many seconds each screen stays visible before the rotation advances
 - the rotating default message array
 - how many seconds an API message stays live before the display returns to the default rotation
 
@@ -140,6 +141,7 @@ Start the server and open [http://localhost:8080/admin](http://localhost:8080/ad
 
 The admin panel lets you change:
 - board columns and rows
+- screen message duration in seconds for the default rotation
 - the default rotating messages
 - API message lifetime in seconds before the display falls back to the default rotation
 - send a temporary remote message without leaving `/admin`

@@ -24,6 +24,7 @@ ADMIN_PASSWORD_ENV = 'FLIPOFF_ADMIN_PASSWORD'
 
 DEFAULT_COLS = 18
 DEFAULT_ROWS = 5
+DEFAULT_MESSAGE_DURATION_SECONDS = 4
 DEFAULT_API_MESSAGE_DURATION_SECONDS = 30
 DEFAULT_MESSAGES = [
     ['', 'GOD IS IN', 'THE DETAILS .', '- LUDWIG MIES', ''],
@@ -44,6 +45,7 @@ class DisplayConfig:
     cols: int
     rows: int
     default_messages: list[list[str]]
+    message_duration_seconds: int
     api_message_duration_seconds: int
 
     def serialize(self) -> dict[str, Any]:
@@ -51,6 +53,7 @@ class DisplayConfig:
             'cols': self.cols,
             'rows': self.rows,
             'defaultMessages': [message.copy() for message in self.default_messages],
+            'messageDurationSeconds': self.message_duration_seconds,
             'apiMessageDurationSeconds': self.api_message_duration_seconds,
         }
 
@@ -58,6 +61,7 @@ class DisplayConfig:
         return {
             'cols': self.cols,
             'rows': self.rows,
+            'messageDurationSeconds': self.message_duration_seconds,
             'apiMessageDurationSeconds': self.api_message_duration_seconds,
         }
 
@@ -117,6 +121,7 @@ def default_display_config() -> DisplayConfig:
         cols=DEFAULT_COLS,
         rows=DEFAULT_ROWS,
         default_messages=[message.copy() for message in DEFAULT_MESSAGES],
+        message_duration_seconds=DEFAULT_MESSAGE_DURATION_SECONDS,
         api_message_duration_seconds=DEFAULT_API_MESSAGE_DURATION_SECONDS,
     )
 
@@ -230,12 +235,18 @@ def normalize_default_messages(messages: Any, cols: int, rows: int) -> list[list
     ]
 
 
-def normalize_runtime_settings_payload(payload: Any) -> tuple[int, int, int]:
+def normalize_runtime_settings_payload(payload: Any) -> tuple[int, int, int, int]:
     if not isinstance(payload, dict):
         raise ValueError('Request body must be a JSON object.')
 
     cols = _coerce_int(payload.get('cols'), 'cols', 6, 40)
     rows = _coerce_int(payload.get('rows'), 'rows', 1, 10)
+    message_duration_seconds = _coerce_int(
+        payload.get('messageDurationSeconds', DEFAULT_MESSAGE_DURATION_SECONDS),
+        'messageDurationSeconds',
+        1,
+        86400,
+    )
     api_message_duration_seconds = _coerce_int(
         payload.get('apiMessageDurationSeconds'),
         'apiMessageDurationSeconds',
@@ -243,7 +254,7 @@ def normalize_runtime_settings_payload(payload: Any) -> tuple[int, int, int]:
         86400,
     )
 
-    return cols, rows, api_message_duration_seconds
+    return cols, rows, message_duration_seconds, api_message_duration_seconds
 
 
 def load_display_settings(config_path: Path | None) -> DisplayConfig:
@@ -253,11 +264,12 @@ def load_display_settings(config_path: Path | None) -> DisplayConfig:
     with config_path.open('r', encoding='utf-8') as config_file:
         payload = json.load(config_file)
 
-    cols, rows, api_message_duration_seconds = normalize_runtime_settings_payload(payload)
+    cols, rows, message_duration_seconds, api_message_duration_seconds = normalize_runtime_settings_payload(payload)
     return DisplayConfig(
         cols=cols,
         rows=rows,
         default_messages=[],
+        message_duration_seconds=message_duration_seconds,
         api_message_duration_seconds=api_message_duration_seconds,
     )
 
@@ -636,7 +648,7 @@ def resolve_screen_lines(
     plugin = plugins[screen['pluginId']]
     cached_lines = screen.get('cachedLines') or []
     if cached_lines:
-        return pad_lines(cached_lines, config.rows)
+        return center_lines(cached_lines, config.rows)
 
     placeholder_lines = plugin.placeholder_lines(
         settings=screen['settings'],
@@ -644,7 +656,7 @@ def resolve_screen_lines(
         context=PluginContext(cols=config.cols, rows=config.rows),
         error=screen.get('lastError'),
     )
-    return pad_lines(
+    return center_lines(
         normalize_message_lines(
             placeholder_lines,
             cols=config.cols,
@@ -1068,7 +1080,7 @@ async def admin_config_put(request: web.Request) -> web.Response:
         return _json_error('Request body must be valid JSON.')
 
     try:
-        cols, rows, api_message_duration_seconds = normalize_runtime_settings_payload(payload)
+        cols, rows, message_duration_seconds, api_message_duration_seconds = normalize_runtime_settings_payload(payload)
         reconciled_screens = reconcile_screens_for_config_change(
             request.app[SCREEN_STATE_KEY].screens,
             cols=cols,
@@ -1081,6 +1093,7 @@ async def admin_config_put(request: web.Request) -> web.Response:
     current_config = request.app[DISPLAY_CONFIG_KEY]
     current_config.cols = cols
     current_config.rows = rows
+    current_config.message_duration_seconds = message_duration_seconds
     current_config.api_message_duration_seconds = api_message_duration_seconds
     request.app[SCREEN_STATE_KEY].screens = reconciled_screens
 
@@ -1194,6 +1207,20 @@ async def favicon_handler(_: web.Request) -> web.Response:
     return web.Response(status=204)
 
 
+@web.middleware
+async def no_cache_static_assets(request: web.Request, handler) -> web.StreamResponse:
+    response = await handler(request)
+    if request.method == 'GET' and (
+        request.path in {'/', '/index.html', '/admin', '/admin/', '/screenshot.png', '/favicon.ico'}
+        or request.path.startswith('/js/')
+        or request.path.startswith('/css/')
+    ):
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
+
+
 async def initialize_plugin_runtime(app: web.Application) -> None:
     app[PLUGIN_HTTP_SESSION_KEY] = ClientSession(timeout=ClientTimeout(total=20))
     await refresh_all_plugin_screens(app, broadcast=False)
@@ -1278,7 +1305,7 @@ def create_app(
     message_state = MessageState(lines=[''] * display_config.rows)
     resolved_admin_password, generated_admin_password = resolve_admin_password(admin_password)
 
-    app = web.Application()
+    app = web.Application(middlewares=[no_cache_static_assets])
     app[DISPLAY_CONFIG_KEY] = display_config
     app[MESSAGE_STATE_KEY] = message_state
     app[SCREEN_STATE_KEY] = screen_state

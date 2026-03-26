@@ -18,7 +18,10 @@ async function bootstrap() {
 
   let remoteOverrideActive = false;
   const board = new Board(boardContainer, soundEngine, displayConfig);
-  const rotator = new MessageRotator(board, { messages: displayConfig.defaultMessages });
+  const rotator = new MessageRotator(board, {
+    messages: displayConfig.defaultMessages,
+    messageDurationSeconds: displayConfig.messageDurationSeconds,
+  });
   const keyboard = new KeyboardController(rotator, soundEngine);
 
   // Avoid unused lint noise in environments that inspect bindings.
@@ -118,6 +121,7 @@ function cloneConfig(config) {
   return {
     cols: config.cols,
     rows: config.rows,
+    messageDurationSeconds: config.messageDurationSeconds,
     apiMessageDurationSeconds: config.apiMessageDurationSeconds,
     defaultMessages: config.defaultMessages.map((message) => [...message]),
   };
@@ -127,6 +131,7 @@ function serializeConfig(config) {
   return JSON.stringify({
     cols: config.cols,
     rows: config.rows,
+    messageDurationSeconds: config.messageDurationSeconds,
     apiMessageDurationSeconds: config.apiMessageDurationSeconds,
     defaultMessages: config.defaultMessages,
   });

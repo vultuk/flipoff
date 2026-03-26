@@ -74,6 +74,7 @@ class FlipOffServerTests(AioHTTPTestCase):
         payload = await response.json()
         self.assertEqual(payload['cols'], 18)
         self.assertEqual(payload['rows'], 5)
+        self.assertEqual(payload['messageDurationSeconds'], 4)
         self.assertEqual(payload['apiMessageDurationSeconds'], 30)
         self.assertGreater(len(payload['defaultMessages']), 0)
 
@@ -155,6 +156,7 @@ class FlipOffServerTests(AioHTTPTestCase):
             json={
                 'cols': 18,
                 'rows': 5,
+                'messageDurationSeconds': 4,
                 'apiMessageDurationSeconds': 1,
             },
         )
@@ -184,6 +186,7 @@ class FlipOffServerTests(AioHTTPTestCase):
             json={
                 'cols': 20,
                 'rows': 5,
+                'messageDurationSeconds': 12,
                 'apiMessageDurationSeconds': 45,
             },
         )
@@ -192,12 +195,14 @@ class FlipOffServerTests(AioHTTPTestCase):
         payload = await response.json()
         self.assertEqual(payload['cols'], 20)
         self.assertEqual(payload['rows'], 5)
+        self.assertEqual(payload['messageDurationSeconds'], 12)
         self.assertEqual(payload['apiMessageDurationSeconds'], 45)
 
         public_config = await self.client.get('/api/config')
         public_payload = await public_config.json()
         self.assertEqual(public_payload['cols'], 20)
         self.assertEqual(public_payload['rows'], 5)
+        self.assertEqual(public_payload['messageDurationSeconds'], 12)
         self.assertEqual(len(public_payload['defaultMessages'][0]), 5)
 
     async def test_admin_screens_update_changes_public_config_with_manual_screen(self):
@@ -254,13 +259,15 @@ class FlipOffServerTests(AioHTTPTestCase):
 
         payload = await response.json()
         self.assertEqual(payload['screens'][0]['pluginId'], 'fake_forecast')
-        self.assertEqual(payload['screens'][0]['previewLines'][0], 'LONDON 3 DAY')
-        self.assertEqual(payload['screens'][0]['previewLines'][1], 'RUN 1')
+        self.assertEqual(payload['screens'][0]['previewLines'][0], '')
+        self.assertEqual(payload['screens'][0]['previewLines'][1], 'LONDON 3 DAY')
+        self.assertEqual(payload['screens'][0]['previewLines'][2], 'RUN 1')
 
         public_config = await self.client.get('/api/config')
         public_payload = await public_config.json()
-        self.assertEqual(public_payload['defaultMessages'][0][0], 'LONDON 3 DAY')
-        self.assertEqual(public_payload['defaultMessages'][0][1], 'RUN 1')
+        self.assertEqual(public_payload['defaultMessages'][0][0], '')
+        self.assertEqual(public_payload['defaultMessages'][0][1], 'LONDON 3 DAY')
+        self.assertEqual(public_payload['defaultMessages'][0][2], 'RUN 1')
 
     async def test_plugin_screen_refresh_endpoint_updates_preview(self):
         await self.authenticate()
@@ -288,7 +295,7 @@ class FlipOffServerTests(AioHTTPTestCase):
         refresh_response = await self.client.post(f'/api/admin/screens/{screen_id}/refresh')
         self.assertEqual(refresh_response.status, 200)
         refresh_payload = await refresh_response.json()
-        self.assertEqual(refresh_payload['screen']['previewLines'][1], 'RUN 2')
+        self.assertEqual(refresh_payload['screen']['previewLines'][2], 'RUN 2')
 
     async def test_plugin_screen_scheduler_refreshes_on_interval(self):
         await self.authenticate()
@@ -314,7 +321,7 @@ class FlipOffServerTests(AioHTTPTestCase):
         await asyncio.sleep(1.2)
         public_config = await self.client.get('/api/config')
         public_payload = await public_config.json()
-        self.assertEqual(public_payload['defaultMessages'][0][1], 'RUN 2')
+        self.assertEqual(public_payload['defaultMessages'][0][2], 'RUN 2')
 
     async def test_plugin_common_settings_persist_to_user_config(self):
         await self.authenticate()
@@ -345,6 +352,7 @@ class FlipOffServerTests(AioHTTPTestCase):
             {
                 'cols': 18,
                 'rows': 5,
+                'messageDurationSeconds': 4,
                 'apiMessageDurationSeconds': 30,
                 'pluginCommonSettings': {
                     'forecast': {

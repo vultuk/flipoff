@@ -96,7 +96,7 @@
             class="nav-link"
             data-page-target="settings"
             data-page-title="Settings"
-            data-page-copy="Adjust board geometry and API override duration for the live display."
+            data-page-copy="Adjust board geometry, default screen timing, and API override duration for the live display."
           >
             <span class="nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" focusable="false">
@@ -181,6 +181,11 @@
                 <label class="field">
                   <span>Rows</span>
                   <input id="rows" name="rows" type="number" min="1" max="10" required>
+                </label>
+
+                <label class="field">
+                  <span>Screen message duration (seconds)</span>
+                  <input id="message-duration" name="message-duration" type="number" min="1" max="86400" required>
                 </label>
 
                 <label class="field">

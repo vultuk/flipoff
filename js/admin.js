@@ -11,6 +11,7 @@ const statusMessage = document.getElementById('status-message');
 
 const colsInput = document.getElementById('cols');
 const rowsInput = document.getElementById('rows');
+const messageDurationInput = document.getElementById('message-duration');
 const durationInput = document.getElementById('api-duration');
 const passwordInput = document.getElementById('password');
 const remoteMessageInput = document.getElementById('remote-message');
@@ -168,6 +169,7 @@ async function handleSaveSettings(event) {
       body: JSON.stringify({
         cols: Number(colsInput.value),
         rows: Number(rowsInput.value),
+        messageDurationSeconds: Number(messageDurationInput.value),
         apiMessageDurationSeconds: Number(durationInput.value),
       }),
     });
@@ -526,11 +528,13 @@ function applyConfig(config) {
   currentConfig = {
     cols: config.cols,
     rows: config.rows,
+    messageDurationSeconds: config.messageDurationSeconds,
     apiMessageDurationSeconds: config.apiMessageDurationSeconds,
   };
 
   colsInput.value = String(config.cols);
   rowsInput.value = String(config.rows);
+  messageDurationInput.value = String(config.messageDurationSeconds);
   durationInput.value = String(config.apiMessageDurationSeconds);
 }
 
