@@ -168,21 +168,19 @@ class OpenMeteoForecastPlugin(ScreenPlugin):
         show_conditions = bool(design.get('showConditions', True))
         unit_symbol = 'F' if units == 'I' else 'C'
 
-        lines: list[str] = []
-        for index in range(3):
-            lines.append(
-                self._build_day_line(
-                    {
-                        'valid_date': dates[index],
-                        'min_temp': min_temps[index],
-                        'max_temp': max_temps[index],
-                        'weather_code': weather_codes[index],
-                    },
-                    context.cols,
-                    unit_symbol,
-                    show_conditions,
-                )
+        rows = [
+            self._build_day_row(
+                {
+                    'valid_date': dates[index],
+                    'min_temp': min_temps[index],
+                    'max_temp': max_temps[index],
+                    'weather_code': weather_codes[index],
+                },
+                unit_symbol,
             )
+            for index in range(3)
+        ]
+        lines = self._format_forecast_rows(rows, context.cols, show_conditions)
         lines = self.with_optional_title(lines, design=design, context=context)
 
         return PluginRefreshResult(
@@ -206,30 +204,48 @@ class OpenMeteoForecastPlugin(ScreenPlugin):
             self._fit(detail, context.cols),
         ], design=design, context=context)[: context.rows]
 
-    def _build_day_line(
+    def _build_day_row(
         self,
         day: dict[str, Any],
-        cols: int,
         unit_symbol: str,
-        show_conditions: bool,
-    ) -> str:
+    ) -> tuple[str, str, str]:
         valid_date = str(day.get('valid_date') or '').strip()
         weekday = self._weekday_label(valid_date)
-
         min_temp = self._format_temperature(day.get('min_temp'))
         max_temp = self._format_temperature(day.get('max_temp'))
-        base = f'{weekday} {min_temp}/{max_temp}{unit_symbol}'
+        description = WEATHER_CODE_LABELS.get(day.get('weather_code'), '')
+        return weekday, f'{min_temp}/{max_temp}{unit_symbol}', description
+
+    def _format_forecast_rows(
+        self,
+        rows: list[tuple[str, str, str]],
+        cols: int,
+        show_conditions: bool,
+    ) -> list[str]:
+        if not rows:
+            return []
+
+        weekday_width = max(len(weekday) for weekday, _, _ in rows)
+        temperature_width = max(len(temperature) for _, temperature, _ in rows)
+        base_lines = [
+            f'{weekday.ljust(weekday_width)}  {temperature.rjust(temperature_width)}'
+            for weekday, temperature, _ in rows
+        ]
 
         if not show_conditions:
-            return self._fit(base, cols)
+            return [self._fit(line, cols) for line in base_lines]
 
-        description = WEATHER_CODE_LABELS.get(day.get('weather_code'), '')
-        remaining = cols - len(base) - 1
+        description_width = cols - weekday_width - 2 - temperature_width - 2
+        if description_width <= 0:
+            return [self._fit(line, cols) for line in base_lines]
 
-        if remaining <= 0 or not description:
-            return self._fit(base, cols)
-
-        return self._fit(f'{base} {description[:remaining]}', cols)
+        return [
+            self._fit(
+                f'{weekday.ljust(weekday_width)}  {temperature.rjust(temperature_width)}  {(description or "--")[:description_width].rjust(description_width)}',
+                cols,
+            )
+            for weekday, temperature, description in rows
+        ]
 
     def _weekday_label(self, valid_date: str) -> str:
         try:
