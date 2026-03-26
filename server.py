@@ -497,6 +497,19 @@ async def cleanup_background_tasks(app: web.Application) -> None:
             await override_task
 
 
+async def close_websockets(app: web.Application) -> None:
+    websocket_close_tasks = [
+        ws.close(code=1001, message=b'server shutdown')
+        for ws in set(app[WS_CLIENTS_KEY])
+        if not ws.closed
+    ]
+
+    if websocket_close_tasks:
+        await asyncio.gather(*websocket_close_tasks, return_exceptions=True)
+
+    app[WS_CLIENTS_KEY].clear()
+
+
 def resolve_admin_password(admin_password: str | None) -> tuple[str, bool]:
     if admin_password:
         return admin_password, False
@@ -529,6 +542,7 @@ def create_app(*, admin_password: str | None = None, config_path: Path | None = 
     app[OVERRIDE_TASK_KEY] = OverrideTaskState()
 
     app.on_startup.append(announce_admin_password)
+    app.on_shutdown.append(close_websockets)
     app.on_cleanup.append(cleanup_background_tasks)
 
     app.router.add_get('/', index_handler)
