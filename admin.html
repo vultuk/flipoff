@@ -96,7 +96,7 @@
             class="nav-link"
             data-page-target="settings"
             data-page-title="Settings"
-            data-page-copy="Adjust board geometry, default screen timing, and API override duration for the live display."
+            data-page-copy="Adjust board geometry, default screen timing, admin password, and API override duration for the live display."
           >
             <span class="nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" focusable="false">
@@ -192,10 +192,20 @@
                   <span>API message duration (seconds)</span>
                   <input id="api-duration" name="api-duration" type="number" min="1" max="86400" required>
                 </label>
+
+                <label class="field">
+                  <span>New admin password</span>
+                  <input id="admin-password-setting" name="admin-password-setting" type="password" autocomplete="new-password" placeholder="Leave blank to keep current password">
+                </label>
+
+                <label class="field">
+                  <span>Confirm new admin password</span>
+                  <input id="admin-password-confirm-setting" name="admin-password-confirm-setting" type="password" autocomplete="new-password" placeholder="Repeat the new password">
+                </label>
               </div>
 
               <p class="helper-copy">
-                Changes save to the server config immediately. If you tighten the board size, make sure your screen messages still fit within the new limits.
+                Changes save to the server config immediately. Leave the password fields blank to keep the current admin password. If you tighten the board size, make sure your screen messages still fit within the new limits.
               </p>
 
               <button type="submit" class="primary-btn">Save Settings</button>

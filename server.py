@@ -20,7 +20,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 USER_DATA_DIR = Path.home() / '.flipoff'
 CONFIG_PATH = USER_DATA_DIR / 'config.json'
 SCREENS_PATH = USER_DATA_DIR / 'screens.json'
-ADMIN_PASSWORD_ENV = 'FLIPOFF_ADMIN_PASSWORD'
 
 DEFAULT_COLS = 18
 DEFAULT_ROWS = 5
@@ -96,6 +95,12 @@ class OverrideTaskState:
 
 
 @dataclass
+class AdminPasswordState:
+    password: str
+    generated: bool = False
+
+
+@dataclass
 class ScreenState:
     screens: list[dict[str, Any]] = field(default_factory=list)
     common_settings: dict[str, Any] = field(default_factory=dict)
@@ -106,8 +111,7 @@ DISPLAY_CONFIG_KEY = web.AppKey('display_config', DisplayConfig)
 MESSAGE_STATE_KEY = web.AppKey('message_state', MessageState)
 SCREEN_STATE_KEY = web.AppKey('screen_state', ScreenState)
 WS_CLIENTS_KEY = web.AppKey('ws_clients', set)
-ADMIN_PASSWORD_KEY = web.AppKey('admin_password', str)
-GENERATED_ADMIN_PASSWORD_KEY = web.AppKey('generated_admin_password', bool)
+ADMIN_PASSWORD_STATE_KEY = web.AppKey('admin_password_state', AdminPasswordState)
 SESSION_TOKENS_KEY = web.AppKey('session_tokens', set)
 CONFIG_PATH_KEY = web.AppKey('config_path', object)
 SCREENS_PATH_KEY = web.AppKey('screens_path', object)
@@ -257,12 +261,23 @@ def normalize_runtime_settings_payload(payload: Any) -> tuple[int, int, int, int
     return cols, rows, message_duration_seconds, api_message_duration_seconds
 
 
-def load_display_settings(config_path: Path | None) -> DisplayConfig:
+def load_config_payload(config_path: Path | None) -> dict[str, Any]:
     if config_path is None or not config_path.exists():
-        return default_display_config()
+        return {}
 
     with config_path.open('r', encoding='utf-8') as config_file:
         payload = json.load(config_file)
+
+    if not isinstance(payload, dict):
+        raise ValueError('Config file must contain a JSON object.')
+
+    return payload
+
+
+def load_display_settings(config_path: Path | None) -> DisplayConfig:
+    payload = load_config_payload(config_path)
+    if not payload:
+        return default_display_config()
 
     cols, rows, message_duration_seconds, api_message_duration_seconds = normalize_runtime_settings_payload(payload)
     return DisplayConfig(
@@ -279,6 +294,7 @@ def save_display_settings(
     config: DisplayConfig,
     *,
     plugin_common_settings: dict[str, Any],
+    admin_password: str,
 ) -> None:
     if config_path is None:
         return
@@ -287,6 +303,7 @@ def save_display_settings(
     with config_path.open('w', encoding='utf-8') as config_file:
         payload = config.serialize_settings()
         payload['pluginCommonSettings'] = plugin_common_settings
+        payload['adminPassword'] = admin_password
         json.dump(payload, config_file, indent=2)
         config_file.write('\n')
 
@@ -411,19 +428,21 @@ def load_plugin_common_settings(
     *,
     plugins: dict[str, ScreenPlugin],
 ) -> dict[str, Any]:
-    if common_settings_path is None or not common_settings_path.exists():
+    payload = load_config_payload(common_settings_path)
+    if not payload:
         return normalize_plugin_common_settings(None, plugins=plugins)
 
-    with common_settings_path.open('r', encoding='utf-8') as config_file:
-        payload = json.load(config_file)
-
-    if isinstance(payload, dict):
-        payload = payload.get('pluginCommonSettings')
+    payload = payload.get('pluginCommonSettings')
 
     return normalize_plugin_common_settings(payload, plugins=plugins)
 
 
-def save_plugin_common_settings(common_settings_path: Path | None, common_settings: dict[str, Any]) -> None:
+def save_plugin_common_settings(
+    common_settings_path: Path | None,
+    common_settings: dict[str, Any],
+    *,
+    admin_password: str,
+) -> None:
     if common_settings_path is None:
         return
 
@@ -432,7 +451,18 @@ def save_plugin_common_settings(common_settings_path: Path | None, common_settin
         common_settings_path,
         display_config,
         plugin_common_settings=common_settings,
+        admin_password=admin_password,
     )
+
+
+def load_admin_password(config_path: Path | None) -> str | None:
+    payload = load_config_payload(config_path)
+    raw_password = payload.get('adminPassword')
+    if not isinstance(raw_password, str):
+        return None
+
+    password = raw_password.strip()
+    return password or None
 
 
 def normalize_schema_values(
@@ -693,8 +723,10 @@ def apply_runtime_display_config(config: DisplayConfig) -> dict[str, Any]:
     return config.serialize()
 
 
-def build_admin_config_response(config: DisplayConfig) -> dict[str, Any]:
-    return config.serialize_settings()
+def build_admin_config_response(config: DisplayConfig, *, has_admin_password: bool) -> dict[str, Any]:
+    payload = config.serialize_settings()
+    payload['hasAdminPassword'] = has_admin_password
+    return payload
 
 
 def serialize_screen_for_admin(
@@ -1029,7 +1061,7 @@ async def delete_message(request: web.Request) -> web.Response:
 
 
 async def admin_session_create(request: web.Request) -> web.Response:
-    configured_password = request.app[ADMIN_PASSWORD_KEY]
+    configured_password = request.app[ADMIN_PASSWORD_STATE_KEY].password
     try:
         payload = await request.json()
     except Exception:
@@ -1068,7 +1100,12 @@ async def admin_session_delete(request: web.Request) -> web.Response:
 async def admin_config_get(request: web.Request) -> web.Response:
     require_admin(request)
     sync_display_messages(request.app)
-    return web.json_response(build_admin_config_response(request.app[DISPLAY_CONFIG_KEY]))
+    return web.json_response(
+        build_admin_config_response(
+            request.app[DISPLAY_CONFIG_KEY],
+            has_admin_password=bool(request.app[ADMIN_PASSWORD_STATE_KEY].password),
+        )
+    )
 
 
 async def admin_config_put(request: web.Request) -> web.Response:
@@ -1087,6 +1124,7 @@ async def admin_config_put(request: web.Request) -> web.Response:
             rows=rows,
             plugins=request.app[PLUGINS_KEY],
         )
+        submitted_admin_password = _coerce_optional_string(payload.get('adminPassword'), 'adminPassword')
     except ValueError as exc:
         return _json_error(str(exc))
 
@@ -1096,11 +1134,15 @@ async def admin_config_put(request: web.Request) -> web.Response:
     current_config.message_duration_seconds = message_duration_seconds
     current_config.api_message_duration_seconds = api_message_duration_seconds
     request.app[SCREEN_STATE_KEY].screens = reconciled_screens
+    if submitted_admin_password:
+        request.app[ADMIN_PASSWORD_STATE_KEY].password = submitted_admin_password
+        request.app[ADMIN_PASSWORD_STATE_KEY].generated = False
 
     save_display_settings(
         request.app[CONFIG_PATH_KEY],
         current_config,
         plugin_common_settings=request.app[SCREEN_STATE_KEY].common_settings,
+        admin_password=request.app[ADMIN_PASSWORD_STATE_KEY].password,
     )
     save_screens(request.app[SCREENS_PATH_KEY], request.app[SCREEN_STATE_KEY].screens)
 
@@ -1109,7 +1151,12 @@ async def admin_config_put(request: web.Request) -> web.Response:
     await clear_override(request.app)
     await broadcast_display_config(request.app)
 
-    return web.json_response(build_admin_config_response(current_config))
+    return web.json_response(
+        build_admin_config_response(
+            current_config,
+            has_admin_password=bool(request.app[ADMIN_PASSWORD_STATE_KEY].password),
+        )
+    )
 
 
 async def admin_screens_get(request: web.Request) -> web.Response:
@@ -1147,7 +1194,11 @@ async def admin_screens_put(request: web.Request) -> web.Response:
     request.app[SCREEN_STATE_KEY].screens = normalized_screens
     request.app[SCREEN_STATE_KEY].common_settings = common_settings
     save_screens(request.app[SCREENS_PATH_KEY], normalized_screens)
-    save_plugin_common_settings(request.app[CONFIG_PATH_KEY], common_settings)
+    save_plugin_common_settings(
+        request.app[CONFIG_PATH_KEY],
+        common_settings,
+        admin_password=request.app[ADMIN_PASSWORD_STATE_KEY].password,
+    )
 
     await refresh_all_plugin_screens(request.app, broadcast=False)
     restart_plugin_refresh_tasks(request.app)
@@ -1259,20 +1310,21 @@ async def close_websockets(app: web.Application) -> None:
     app[WS_CLIENTS_KEY].clear()
 
 
-def resolve_admin_password(admin_password: str | None) -> tuple[str, bool]:
+def resolve_admin_password(admin_password: str | None, config_path: Path | None) -> tuple[str, bool]:
     if admin_password:
         return admin_password, False
 
-    env_password = os.environ.get(ADMIN_PASSWORD_ENV)
-    if env_password:
-        return env_password, False
+    config_password = load_admin_password(config_path)
+    if config_password:
+        return config_password, False
 
     return secrets.token_urlsafe(16), True
 
 
 async def announce_admin_password(app: web.Application) -> None:
-    if app[GENERATED_ADMIN_PASSWORD_KEY]:
-        print(f'[flipoff] Generated admin password: {app[ADMIN_PASSWORD_KEY]}', flush=True)
+    admin_password_state = app[ADMIN_PASSWORD_STATE_KEY]
+    if admin_password_state.generated:
+        print(f'[flipoff] Generated admin password: {admin_password_state.password}', flush=True)
 
 
 def create_app(
@@ -1303,15 +1355,23 @@ def create_app(
         plugin_registry,
     )
     message_state = MessageState(lines=[''] * display_config.rows)
-    resolved_admin_password, generated_admin_password = resolve_admin_password(admin_password)
+    resolved_admin_password, generated_admin_password = resolve_admin_password(admin_password, config_path)
+    save_display_settings(
+        config_path,
+        display_config,
+        plugin_common_settings=loaded_common_settings,
+        admin_password=resolved_admin_password,
+    )
 
     app = web.Application(middlewares=[no_cache_static_assets])
     app[DISPLAY_CONFIG_KEY] = display_config
     app[MESSAGE_STATE_KEY] = message_state
     app[SCREEN_STATE_KEY] = screen_state
     app[WS_CLIENTS_KEY] = set()
-    app[ADMIN_PASSWORD_KEY] = resolved_admin_password
-    app[GENERATED_ADMIN_PASSWORD_KEY] = generated_admin_password
+    app[ADMIN_PASSWORD_STATE_KEY] = AdminPasswordState(
+        password=resolved_admin_password,
+        generated=generated_admin_password,
+    )
     app[SESSION_TOKENS_KEY] = set()
     app[CONFIG_PATH_KEY] = config_path
     app[SCREENS_PATH_KEY] = screens_path

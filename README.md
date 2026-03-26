@@ -34,12 +34,11 @@ No accounts. No subscriptions. No $199 fee. Just open `index.html` and go.
 
 ```bash
 python3 -m pip install -r requirements.txt
-export FLIPOFF_ADMIN_PASSWORD='choose-a-strong-password'
 python3 server.py
 # Then open http://localhost:8080
 ```
 
-If `FLIPOFF_ADMIN_PASSWORD` is not set, the server generates a random admin password at startup and prints it to the console.
+If `~/.flipoff/config.json` does not contain an admin password yet, the server generates one on startup, writes it into the config file, and prints it to the console. That generated password is then reused on subsequent runs until you change it from `/admin`.
 
 ## Keyboard Shortcuts
 
@@ -93,7 +92,7 @@ flipoff/
 ```
 
 Runtime data is stored outside the repo:
-- `~/.flipoff/config.json` — Board settings and plugin common settings
+- `~/.flipoff/config.json` — Board settings, admin password, and plugin common settings
 - `~/.flipoff/screens.json` — Screen definitions and cached plugin output
 
 ## Customization
@@ -107,6 +106,7 @@ Edit `js/constants.js` to change:
 Use `/admin` for the runtime configuration that the server actually serves:
 - board columns and rows
 - how many seconds each screen stays visible before the rotation advances
+- the admin password
 - the rotating default message array
 - how many seconds an API message stays live before the display returns to the default rotation
 
@@ -142,6 +142,7 @@ Start the server and open [http://localhost:8080/admin](http://localhost:8080/ad
 The admin panel lets you change:
 - board columns and rows
 - screen message duration in seconds for the default rotation
+- the admin password stored in `~/.flipoff/config.json`
 - the default rotating messages
 - API message lifetime in seconds before the display falls back to the default rotation
 - send a temporary remote message without leaving `/admin`

@@ -13,6 +13,8 @@ const colsInput = document.getElementById('cols');
 const rowsInput = document.getElementById('rows');
 const messageDurationInput = document.getElementById('message-duration');
 const durationInput = document.getElementById('api-duration');
+const adminPasswordSettingInput = document.getElementById('admin-password-setting');
+const adminPasswordConfirmSettingInput = document.getElementById('admin-password-confirm-setting');
 const passwordInput = document.getElementById('password');
 const remoteMessageInput = document.getElementById('remote-message');
 
@@ -161,17 +163,32 @@ async function handleSaveSettings(event) {
 
   setStatus('Saving settings...');
 
+  const nextAdminPassword = adminPasswordSettingInput.value;
+  const confirmAdminPassword = adminPasswordConfirmSettingInput.value;
+  if (nextAdminPassword || confirmAdminPassword) {
+    if (nextAdminPassword !== confirmAdminPassword) {
+      setStatus('The new admin password confirmation does not match.', 'error');
+      return;
+    }
+  }
+
   try {
+    const payload = {
+      cols: Number(colsInput.value),
+      rows: Number(rowsInput.value),
+      messageDurationSeconds: Number(messageDurationInput.value),
+      apiMessageDurationSeconds: Number(durationInput.value),
+    };
+
+    if (nextAdminPassword) {
+      payload.adminPassword = nextAdminPassword;
+    }
+
     const response = await fetch('/api/admin/config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({
-        cols: Number(colsInput.value),
-        rows: Number(rowsInput.value),
-        messageDurationSeconds: Number(messageDurationInput.value),
-        apiMessageDurationSeconds: Number(durationInput.value),
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
@@ -179,8 +196,12 @@ async function handleSaveSettings(event) {
       return;
     }
 
+    adminPasswordSettingInput.value = '';
+    adminPasswordConfirmSettingInput.value = '';
     await loadAdminState({
-      successMessage: 'Settings saved. Display pages will refresh automatically.',
+      successMessage: nextAdminPassword
+        ? 'Settings and admin password saved. Display pages will refresh automatically.'
+        : 'Settings saved. Display pages will refresh automatically.',
       showSuccessMessage: true,
     });
   } catch {

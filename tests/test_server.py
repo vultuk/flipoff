@@ -7,7 +7,7 @@ from pathlib import Path
 from aiohttp.test_utils import AioHTTPTestCase
 
 from plugins.base import PluginField, PluginManifest, PluginRefreshResult, ScreenPlugin
-from server import DISPLAY_CONFIG_KEY, create_app
+from server import ADMIN_PASSWORD_STATE_KEY, DISPLAY_CONFIG_KEY, create_app
 
 
 class FakeForecastPlugin(ScreenPlugin):
@@ -197,6 +197,7 @@ class FlipOffServerTests(AioHTTPTestCase):
         self.assertEqual(payload['rows'], 5)
         self.assertEqual(payload['messageDurationSeconds'], 12)
         self.assertEqual(payload['apiMessageDurationSeconds'], 45)
+        self.assertTrue(payload['hasAdminPassword'])
 
         public_config = await self.client.get('/api/config')
         public_payload = await public_config.json()
@@ -354,6 +355,7 @@ class FlipOffServerTests(AioHTTPTestCase):
                 'rows': 5,
                 'messageDurationSeconds': 4,
                 'apiMessageDurationSeconds': 30,
+                'adminPassword': 'secret-password',
                 'pluginCommonSettings': {
                     'forecast': {
                         'apiKey': 'secret-forecast-key',
@@ -369,6 +371,31 @@ class FlipOffServerTests(AioHTTPTestCase):
         public_config = await self.client.get('/api/config')
         public_payload = await public_config.json()
         self.assertNotIn('pluginCommonSettings', public_payload)
+
+    async def test_admin_config_can_change_password(self):
+        await self.authenticate()
+        response = await self.client.put(
+            '/api/admin/config',
+            json={
+                'cols': 18,
+                'rows': 5,
+                'messageDurationSeconds': 4,
+                'apiMessageDurationSeconds': 30,
+                'adminPassword': 'changed-password',
+            },
+        )
+        self.assertEqual(response.status, 200)
+
+        stored_payload = json.loads(self.config_path.read_text(encoding='utf-8'))
+        self.assertEqual(stored_payload['adminPassword'], 'changed-password')
+
+        await self.client.delete('/api/admin/session')
+
+        old_login = await self.client.post('/api/admin/session', json={'password': 'secret-password'})
+        self.assertEqual(old_login.status, 401)
+
+        new_login = await self.client.post('/api/admin/session', json={'password': 'changed-password'})
+        self.assertEqual(new_login.status, 200)
 
     async def test_delete_message_clears_override(self):
         await self.client.post('/api/message', json={'lines': ['remote message']})
@@ -437,6 +464,31 @@ class FlipOffServerTests(AioHTTPTestCase):
         self.assertEqual(updated_config_event['payload']['defaultMessages'][0], ['HELLO', 'WORLD', '', '', ''])
 
         await ws.close()
+
+
+class FlipOffPasswordBootstrapTests(unittest.TestCase):
+    def test_generated_password_is_written_and_reused_from_config(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / '.flipoff' / 'config.json'
+            screens_path = Path(temp_dir) / '.flipoff' / 'screens.json'
+
+            first_app = create_app(
+                config_path=config_path,
+                screens_path=screens_path,
+                plugins={},
+            )
+            first_password = first_app[ADMIN_PASSWORD_STATE_KEY].password
+            self.assertTrue(config_path.exists())
+
+            stored_payload = json.loads(config_path.read_text(encoding='utf-8'))
+            self.assertEqual(stored_payload['adminPassword'], first_password)
+
+            second_app = create_app(
+                config_path=config_path,
+                screens_path=screens_path,
+                plugins={},
+            )
+            self.assertEqual(second_app[ADMIN_PASSWORD_STATE_KEY].password, first_password)
 
 
 if __name__ == '__main__':
