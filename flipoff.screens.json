@@ -34,7 +34,52 @@
         "FRI 7/12C DRIZZLE",
         "SAT 5/10C DRIZZLE"
       ],
-      "lastRefreshedAt": "2026-03-26T19:27:45.419002Z",
+      "lastRefreshedAt": "2026-03-26T19:44:04.140402Z",
+      "lastError": null
+    },
+    {
+      "id": "f459e3a5-fae8-416b-9ea3-23b807b94390",
+      "type": "plugin",
+      "name": "",
+      "enabled": true,
+      "pluginId": "github_repo_stats",
+      "refreshIntervalSeconds": 300,
+      "settings": {
+        "repository": "magnum6actual/flipoff"
+      },
+      "design": {
+        "title": ""
+      },
+      "cachedLines": [
+        "GITHUB STATS",
+        "MAGNUM6ACTUAL/FLIPOFF",
+        "STAR 350",
+        "WATCH 1",
+        "FORK 57"
+      ],
+      "lastRefreshedAt": "2026-03-26T19:44:04.368944Z",
+      "lastError": null
+    },
+    {
+      "id": "29b91936-a815-4327-b97a-6fa42af3ada1",
+      "type": "plugin",
+      "name": "",
+      "enabled": true,
+      "pluginId": "github_open_work",
+      "refreshIntervalSeconds": 300,
+      "settings": {
+        "repository": "magnum6actual/flipoff"
+      },
+      "design": {
+        "title": ""
+      },
+      "cachedLines": [
+        "OPEN WORK",
+        "MAGNUM6ACTUAL/FLIPOFF",
+        "ISSUE 2",
+        "PR 1"
+      ],
+      "lastRefreshedAt": "2026-03-26T19:44:04.884952Z",
       "lastError": null
     }
   ]
