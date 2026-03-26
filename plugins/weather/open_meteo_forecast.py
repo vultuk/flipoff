@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from .base import (
+from ..base import (
     PluginContext,
     PluginField,
     PluginFieldOption,
@@ -104,6 +104,8 @@ class OpenMeteoForecastPlugin(ScreenPlugin):
         design: dict[str, Any],
         context: PluginContext,
         http_session,
+        previous_state=None,
+        common_settings=None,
     ) -> PluginRefreshResult:
         city = str(settings.get('city', '')).strip()
         country = str(settings.get('country', '')).strip().upper()
@@ -163,11 +165,10 @@ class OpenMeteoForecastPlugin(ScreenPlugin):
         if not all(isinstance(series, list) and len(series) >= 3 for series in (dates, max_temps, min_temps, weather_codes)):
             raise ValueError('Open-Meteo did not return a complete three day forecast.')
 
-        title = str(design.get('title') or location.get('name') or city).strip().upper()
         show_conditions = bool(design.get('showConditions', True))
         unit_symbol = 'F' if units == 'I' else 'C'
 
-        lines = [self._fit(title, context.cols)]
+        lines: list[str] = []
         for index in range(3):
             lines.append(
                 self._build_day_line(
@@ -182,6 +183,7 @@ class OpenMeteoForecastPlugin(ScreenPlugin):
                     show_conditions,
                 )
             )
+        lines = self.with_optional_title(lines, design=design, context=context)
 
         return PluginRefreshResult(
             lines=lines[: context.rows],
@@ -199,13 +201,10 @@ class OpenMeteoForecastPlugin(ScreenPlugin):
         context: PluginContext,
         error: str | None = None,
     ) -> list[str]:
-        title = str(design.get('title') or settings.get('city') or 'WEATHER').strip().upper()
         detail = (error or 'WAITING FOR DATA').upper()
-        return [
-            '',
-            self._fit(title, context.cols),
+        return self.with_optional_title([
             self._fit(detail, context.cols),
-        ][: context.rows]
+        ], design=design, context=context)[: context.rows]
 
     def _build_day_line(
         self,

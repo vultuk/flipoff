@@ -7,7 +7,7 @@ from pathlib import Path
 from aiohttp.test_utils import AioHTTPTestCase
 
 from plugins.base import PluginField, PluginManifest, PluginRefreshResult, ScreenPlugin
-from server import DISPLAY_CONFIG_KEY, SCREENS_PATH, create_app
+from server import DISPLAY_CONFIG_KEY, create_app
 
 
 class FakeForecastPlugin(ScreenPlugin):
@@ -18,6 +18,10 @@ class FakeForecastPlugin(ScreenPlugin):
             name='Fake Forecast',
             description='Test plugin.',
             default_refresh_interval_seconds=1,
+            common_settings_namespace='forecast',
+            common_settings_schema=(
+                PluginField(name='apiKey', label='API Key', field_type='text', default=''),
+            ),
             settings_schema=(
                 PluginField(name='city', label='City', field_type='text', required=True),
                 PluginField(name='country', label='Country', field_type='text', required=True),
@@ -27,7 +31,7 @@ class FakeForecastPlugin(ScreenPlugin):
             ),
         )
 
-    async def refresh(self, *, settings, design, context, http_session):
+    async def refresh(self, *, settings, design, context, http_session, previous_state=None, common_settings=None):
         self.refresh_count += 1
         title = (design.get('title') or settings['city']).upper()
         return PluginRefreshResult(
@@ -42,15 +46,13 @@ class FakeForecastPlugin(ScreenPlugin):
 class FlipOffServerTests(AioHTTPTestCase):
     async def get_application(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.config_path = Path(self.temp_dir.name) / 'flipoff.config.json'
-        self.screens_path = Path(self.temp_dir.name) / 'flipoff.screens.json'
-        self.legacy_messages_path = Path(self.temp_dir.name) / 'flipoff.messages.json'
+        self.config_path = Path(self.temp_dir.name) / '.flipoff' / 'config.json'
+        self.screens_path = Path(self.temp_dir.name) / '.flipoff' / 'screens.json'
         self.fake_plugin = FakeForecastPlugin()
         return create_app(
             admin_password='secret-password',
             config_path=self.config_path,
             screens_path=self.screens_path,
-            messages_path=self.legacy_messages_path,
             plugins={self.fake_plugin.manifest.plugin_id: self.fake_plugin},
         )
 
@@ -203,6 +205,7 @@ class FlipOffServerTests(AioHTTPTestCase):
         response = await self.client.put(
             '/api/admin/screens',
             json={
+                'pluginCommonSettings': {},
                 'screens': [
                     {
                         'type': 'manual',
@@ -233,6 +236,7 @@ class FlipOffServerTests(AioHTTPTestCase):
         response = await self.client.put(
             '/api/admin/screens',
             json={
+                'pluginCommonSettings': {},
                 'screens': [
                     {
                         'type': 'plugin',
@@ -263,6 +267,7 @@ class FlipOffServerTests(AioHTTPTestCase):
         create_response = await self.client.put(
             '/api/admin/screens',
             json={
+                'pluginCommonSettings': {},
                 'screens': [
                     {
                         'type': 'plugin',
@@ -290,6 +295,7 @@ class FlipOffServerTests(AioHTTPTestCase):
         response = await self.client.put(
             '/api/admin/screens',
             json={
+                'pluginCommonSettings': {},
                 'screens': [
                     {
                         'type': 'plugin',
@@ -309,6 +315,52 @@ class FlipOffServerTests(AioHTTPTestCase):
         public_config = await self.client.get('/api/config')
         public_payload = await public_config.json()
         self.assertEqual(public_payload['defaultMessages'][0][1], 'RUN 2')
+
+    async def test_plugin_common_settings_persist_to_user_config(self):
+        await self.authenticate()
+        response = await self.client.put(
+            '/api/admin/screens',
+            json={
+                'pluginCommonSettings': {
+                    'forecast': {
+                        'apiKey': 'secret-forecast-key',
+                    }
+                },
+                'screens': [
+                    {
+                        'type': 'manual',
+                        'name': 'Welcome',
+                        'enabled': True,
+                        'lines': ['hello'],
+                    }
+                ],
+            },
+        )
+        self.assertEqual(response.status, 200)
+        self.assertTrue(self.config_path.exists())
+
+        stored_payload = json.loads(self.config_path.read_text(encoding='utf-8'))
+        self.assertEqual(
+            stored_payload,
+            {
+                'cols': 18,
+                'rows': 5,
+                'apiMessageDurationSeconds': 30,
+                'pluginCommonSettings': {
+                    'forecast': {
+                        'apiKey': 'secret-forecast-key',
+                    }
+                }
+            },
+        )
+
+        admin_screens = await self.client.get('/api/admin/screens')
+        admin_payload = await admin_screens.json()
+        self.assertEqual(admin_payload['pluginCommonSettings']['forecast']['apiKey'], 'secret-forecast-key')
+
+        public_config = await self.client.get('/api/config')
+        public_payload = await public_config.json()
+        self.assertNotIn('pluginCommonSettings', public_payload)
 
     async def test_delete_message_clears_override(self):
         await self.client.post('/api/message', json={'lines': ['remote message']})

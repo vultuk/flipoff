@@ -54,6 +54,8 @@ class PluginManifest:
     default_refresh_interval_seconds: int
     settings_schema: tuple[PluginField, ...] = ()
     design_schema: tuple[PluginField, ...] = ()
+    common_settings_namespace: str = ''
+    common_settings_schema: tuple[PluginField, ...] = ()
 
     def serialize(self) -> dict[str, Any]:
         return {
@@ -63,6 +65,8 @@ class PluginManifest:
             'defaultRefreshIntervalSeconds': self.default_refresh_interval_seconds,
             'settingsSchema': [field.serialize() for field in self.settings_schema],
             'designSchema': [field.serialize() for field in self.design_schema],
+            'commonSettingsNamespace': self.common_settings_namespace,
+            'commonSettingsSchema': [field.serialize() for field in self.common_settings_schema],
         }
 
 
@@ -88,6 +92,8 @@ class ScreenPlugin:
         design: dict[str, Any],
         context: PluginContext,
         http_session: ClientSession,
+        previous_state: dict[str, Any] | None = None,
+        common_settings: dict[str, Any] | None = None,
     ) -> PluginRefreshResult:
         raise NotImplementedError
 
@@ -99,10 +105,27 @@ class ScreenPlugin:
         context: PluginContext,
         error: str | None = None,
     ) -> list[str]:
-        label = design.get('title') or self.manifest.name
-        lines = [
-            '',
-            label.upper()[: context.cols],
-            (error or 'NO DATA').upper()[: context.cols],
-        ]
+        lines = self.with_optional_title(
+            [(error or 'NO DATA').upper()[: context.cols]],
+            design=design,
+            context=context,
+        )
         return lines[: context.rows]
+
+    def get_title_line(self, *, design: dict[str, Any], context: PluginContext) -> str | None:
+        title = str(design.get('title') or '').strip().upper()
+        if not title:
+            return None
+        return title[: context.cols]
+
+    def with_optional_title(
+        self,
+        lines: list[str],
+        *,
+        design: dict[str, Any],
+        context: PluginContext,
+    ) -> list[str]:
+        title_line = self.get_title_line(design=design, context=context)
+        if title_line:
+            return [title_line, '', *lines]
+        return lines

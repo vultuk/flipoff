@@ -62,7 +62,7 @@ The Python server keeps the current remote message and display configuration in 
 
 The board starts at 18 columns by 5 rows. `message` payloads wrap on whole words, then the wrapped block is centered vertically while each line is centered horizontally by the board renderer.
 
-Admin changes are saved to `flipoff.config.json`, so board size, default messages, and API override duration survive a restart.
+Admin changes are saved under `~/.flipoff/`, so board size, plugin settings, screens, and API override duration survive a restart.
 
 ## File Structure
 
@@ -90,8 +90,11 @@ flipoff/
   server.py           — Single-process aiohttp server and API
   requirements.txt    — Python dependency list
   admin.html          — Password-protected admin page shell
-  flipoff.config.json — Runtime config written after admin saves
 ```
+
+Runtime data is stored outside the repo:
+- `~/.flipoff/config.json` — Board settings and plugin common settings
+- `~/.flipoff/screens.json` — Screen definitions and cached plugin output
 
 ## Customization
 

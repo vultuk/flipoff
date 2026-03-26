@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from .base import (
+from ..base import (
     PluginContext,
     PluginField,
     PluginManifest,
     PluginRefreshResult,
     ScreenPlugin,
 )
-from .github_common import (
+from .lib.common import (
     DEFAULT_GITHUB_REPOSITORY,
     compact_repository,
     fetch_repository,
@@ -49,34 +49,31 @@ class GitHubRepoStatsPlugin(ScreenPlugin):
         design,
         context: PluginContext,
         http_session,
+        previous_state=None,
+        common_settings=None,
     ) -> PluginRefreshResult:
         owner, repo = normalize_repository(settings.get('repository'))
         payload = await fetch_repository(owner, repo, http_session)
 
-        title = str(design.get('title') or 'GITHUB STATS').strip().upper()
         repo_label = compact_repository(owner, repo).upper()
-
-        lines = [
-            self._fit(title, context.cols),
+        lines = self.with_optional_title([
             self._fit(repo_label, context.cols),
             self._fit(f"STAR {self._number(payload.get('stargazers_count'))}", context.cols),
             self._fit(f"WATCH {self._number(payload.get('subscribers_count', payload.get('watchers_count')))}", context.cols),
             self._fit(f"FORK {self._number(payload.get('forks_count'))}", context.cols),
-        ]
+        ], design=design, context=context)
 
         return PluginRefreshResult(lines=lines[: context.rows])
 
     def placeholder_lines(self, *, settings, design, context: PluginContext, error=None):
         owner, repo = normalize_repository(settings.get('repository'))
-        title = str(design.get('title') or 'GITHUB STATS').strip().upper()
         detail = (error or compact_repository(owner, repo)).upper()
-        return [
-            self._fit(title, context.cols),
+        return self.with_optional_title([
             self._fit(detail, context.cols),
             self._fit('STAR --', context.cols),
             self._fit('WATCH --', context.cols),
             self._fit('FORK --', context.cols),
-        ][: context.rows]
+        ], design=design, context=context)[: context.rows]
 
     def _number(self, value) -> str:
         try:

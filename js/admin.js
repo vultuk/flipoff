@@ -30,6 +30,8 @@ const screenLineFields = document.getElementById('screen-line-fields');
 const pluginSelect = document.getElementById('plugin-select');
 const pluginRefreshMinutesInput = document.getElementById('plugin-refresh-minutes');
 const pluginSettingsFields = document.getElementById('plugin-settings-fields');
+const pluginCommonSettingsSection = document.getElementById('plugin-common-settings-section');
+const pluginCommonSettingsFields = document.getElementById('plugin-common-settings-fields');
 const pluginDesignFields = document.getElementById('plugin-design-fields');
 const closeScreenModalBtn = document.getElementById('close-screen-modal-btn');
 const cancelScreenModalBtn = document.getElementById('cancel-screen-modal-btn');
@@ -41,6 +43,7 @@ const pagePanels = Array.from(document.querySelectorAll('.workspace-page'));
 
 let currentConfig = null;
 let availablePlugins = [];
+let pluginCommonSettings = {};
 let screenDrafts = [];
 let screensDirty = false;
 let activePage = 'home';
@@ -199,6 +202,7 @@ async function handleSaveScreens(event) {
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
       body: JSON.stringify({
+        pluginCommonSettings,
         screens: screenDrafts.map(serializeScreenForSave),
       }),
     });
@@ -229,6 +233,7 @@ async function handleLogout() {
 
   currentConfig = null;
   availablePlugins = [];
+  pluginCommonSettings = {};
   screenDrafts = [];
   screensDirty = false;
   editingScreenIndex = null;
@@ -437,7 +442,12 @@ function handleSaveScreenModal(event) {
   }
 
   const settings = collectSchemaValues(plugin.settingsSchema, 'settings');
+  const commonSettings = collectSchemaValues(plugin.commonSettingsSchema || [], 'common');
   const design = collectSchemaValues(plugin.designSchema, 'design');
+
+  if (plugin.commonSettingsNamespace) {
+    pluginCommonSettings[plugin.commonSettingsNamespace] = commonSettings;
+  }
 
   upsertScreenDraft(editingScreenIndex, {
     id,
@@ -517,7 +527,6 @@ function applyConfig(config) {
     cols: config.cols,
     rows: config.rows,
     apiMessageDurationSeconds: config.apiMessageDurationSeconds,
-    defaultMessages: clone(config.defaultMessages),
   };
 
   colsInput.value = String(config.cols);
@@ -527,6 +536,7 @@ function applyConfig(config) {
 
 function applyScreensPayload(payload) {
   availablePlugins = clone(payload.plugins || []);
+  pluginCommonSettings = clone(payload.pluginCommonSettings || {});
   screenDrafts = clone(payload.screens || []);
   screensDirty = false;
   updateScreensDraftNote();
@@ -705,7 +715,9 @@ function populatePluginEditor(draft) {
   if (!plugin) {
     pluginRefreshMinutesInput.value = '60';
     pluginSettingsFields.replaceChildren();
+    pluginCommonSettingsFields.replaceChildren();
     pluginDesignFields.replaceChildren();
+    pluginCommonSettingsSection.classList.add('hidden');
     return;
   }
 
@@ -718,14 +730,26 @@ function renderPluginSchemaFields(settingsValues = null, designValues = null) {
   const plugin = getPluginById(pluginSelect.value);
 
   pluginSettingsFields.replaceChildren();
+  pluginCommonSettingsFields.replaceChildren();
   pluginDesignFields.replaceChildren();
 
   if (!plugin) {
+    pluginCommonSettingsSection.classList.add('hidden');
     return;
   }
 
   for (const field of plugin.settingsSchema) {
     pluginSettingsFields.append(buildSchemaField(field, 'settings', settingsValues));
+  }
+
+  const commonSettingsValues = plugin.commonSettingsNamespace
+    ? pluginCommonSettings[plugin.commonSettingsNamespace] || {}
+    : {};
+  const commonSchema = plugin.commonSettingsSchema || [];
+  pluginCommonSettingsSection.classList.toggle('hidden', commonSchema.length === 0);
+
+  for (const field of commonSchema) {
+    pluginCommonSettingsFields.append(buildSchemaField(field, 'common', commonSettingsValues));
   }
 
   for (const field of plugin.designSchema) {

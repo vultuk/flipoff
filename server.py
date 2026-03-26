@@ -17,9 +17,9 @@ from plugins import load_plugins
 from plugins.base import PluginContext, PluginField, ScreenPlugin
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-CONFIG_PATH = PROJECT_ROOT / 'flipoff.config.json'
-SCREENS_PATH = PROJECT_ROOT / 'flipoff.screens.json'
-LEGACY_MESSAGES_PATH = PROJECT_ROOT / 'flipoff.messages.json'
+USER_DATA_DIR = Path.home() / '.flipoff'
+CONFIG_PATH = USER_DATA_DIR / 'config.json'
+SCREENS_PATH = USER_DATA_DIR / 'screens.json'
 ADMIN_PASSWORD_ENV = 'FLIPOFF_ADMIN_PASSWORD'
 
 DEFAULT_COLS = 18
@@ -94,6 +94,7 @@ class OverrideTaskState:
 @dataclass
 class ScreenState:
     screens: list[dict[str, Any]] = field(default_factory=list)
+    common_settings: dict[str, Any] = field(default_factory=dict)
     refresh_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
 
 
@@ -106,7 +107,6 @@ GENERATED_ADMIN_PASSWORD_KEY = web.AppKey('generated_admin_password', bool)
 SESSION_TOKENS_KEY = web.AppKey('session_tokens', set)
 CONFIG_PATH_KEY = web.AppKey('config_path', object)
 SCREENS_PATH_KEY = web.AppKey('screens_path', object)
-LEGACY_MESSAGES_PATH_KEY = web.AppKey('legacy_messages_path', object)
 PLUGINS_KEY = web.AppKey('plugins', dict)
 PLUGIN_HTTP_SESSION_KEY = web.AppKey('plugin_http_session', object)
 OVERRIDE_TASK_KEY = web.AppKey('override_task', OverrideTaskState)
@@ -246,31 +246,36 @@ def normalize_runtime_settings_payload(payload: Any) -> tuple[int, int, int]:
     return cols, rows, api_message_duration_seconds
 
 
-def load_display_settings(config_path: Path | None) -> tuple[DisplayConfig, Any | None]:
+def load_display_settings(config_path: Path | None) -> DisplayConfig:
     if config_path is None or not config_path.exists():
-        return default_display_config(), None
+        return default_display_config()
 
     with config_path.open('r', encoding='utf-8') as config_file:
         payload = json.load(config_file)
 
     cols, rows, api_message_duration_seconds = normalize_runtime_settings_payload(payload)
-    return (
-        DisplayConfig(
-            cols=cols,
-            rows=rows,
-            default_messages=[],
-            api_message_duration_seconds=api_message_duration_seconds,
-        ),
-        payload.get('defaultMessages') if isinstance(payload, dict) else None,
+    return DisplayConfig(
+        cols=cols,
+        rows=rows,
+        default_messages=[],
+        api_message_duration_seconds=api_message_duration_seconds,
     )
 
 
-def save_display_settings(config_path: Path | None, config: DisplayConfig) -> None:
+def save_display_settings(
+    config_path: Path | None,
+    config: DisplayConfig,
+    *,
+    plugin_common_settings: dict[str, Any],
+) -> None:
     if config_path is None:
         return
 
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     with config_path.open('w', encoding='utf-8') as config_file:
-        json.dump(config.serialize_settings(), config_file, indent=2)
+        payload = config.serialize_settings()
+        payload['pluginCommonSettings'] = plugin_common_settings
+        json.dump(payload, config_file, indent=2)
         config_file.write('\n')
 
 
@@ -299,8 +304,6 @@ def build_manual_screens_from_messages(
 def load_screens(
     screens_path: Path | None,
     *,
-    legacy_messages_path: Path | None,
-    legacy_default_messages: Any | None,
     config: DisplayConfig,
     plugins: dict[str, ScreenPlugin],
 ) -> list[dict[str, Any]]:
@@ -312,22 +315,6 @@ def load_screens(
             config=config,
             plugins=plugins,
             existing_screens={},
-        )
-
-    if legacy_messages_path is not None and legacy_messages_path.exists():
-        with legacy_messages_path.open('r', encoding='utf-8') as messages_file:
-            legacy_messages = json.load(messages_file)
-        return build_manual_screens_from_messages(
-            legacy_messages,
-            cols=config.cols,
-            rows=config.rows,
-        )
-
-    if legacy_default_messages is not None:
-        return build_manual_screens_from_messages(
-            legacy_default_messages,
-            cols=config.cols,
-            rows=config.rows,
         )
 
     return build_manual_screens_from_messages(
@@ -355,6 +342,7 @@ def serialize_screen_for_storage(screen: dict[str, Any]) -> dict[str, Any]:
             'refreshIntervalSeconds': screen['refreshIntervalSeconds'],
             'settings': screen['settings'],
             'design': screen['design'],
+            'pluginState': screen.get('pluginState', {}),
             'cachedLines': trim_message_lines(screen.get('cachedLines', [])),
             'lastRefreshedAt': screen.get('lastRefreshedAt'),
             'lastError': screen.get('lastError'),
@@ -363,13 +351,76 @@ def serialize_screen_for_storage(screen: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def save_screens(screens_path: Path | None, screens: list[dict[str, Any]]) -> None:
+def save_screens(
+    screens_path: Path | None,
+    screens: list[dict[str, Any]],
+) -> None:
     if screens_path is None:
         return
 
+    screens_path.parent.mkdir(parents=True, exist_ok=True)
     with screens_path.open('w', encoding='utf-8') as screens_file:
         json.dump({'screens': [serialize_screen_for_storage(screen) for screen in screens]}, screens_file, indent=2)
         screens_file.write('\n')
+
+
+def collect_common_settings_schemas(plugins: dict[str, ScreenPlugin]) -> dict[str, tuple[PluginField, ...]]:
+    schemas: dict[str, tuple[PluginField, ...]] = {}
+    for plugin in plugins.values():
+        namespace = plugin.manifest.common_settings_namespace
+        if not namespace:
+            continue
+        schemas.setdefault(namespace, plugin.manifest.common_settings_schema)
+    return schemas
+
+
+def normalize_plugin_common_settings(payload: Any, *, plugins: dict[str, ScreenPlugin]) -> dict[str, Any]:
+    schemas = collect_common_settings_schemas(plugins)
+    normalized: dict[str, Any] = {}
+
+    if payload is None:
+        payload = {}
+
+    if not isinstance(payload, dict):
+        raise ValueError("'pluginCommonSettings' must be a JSON object.")
+
+    for namespace, schema in schemas.items():
+        normalized[namespace] = normalize_schema_values(
+            payload.get(namespace),
+            schema,
+            section_name=f'pluginCommonSettings.{namespace}',
+        )
+
+    return normalized
+
+
+def load_plugin_common_settings(
+    common_settings_path: Path | None,
+    *,
+    plugins: dict[str, ScreenPlugin],
+) -> dict[str, Any]:
+    if common_settings_path is None or not common_settings_path.exists():
+        return normalize_plugin_common_settings(None, plugins=plugins)
+
+    with common_settings_path.open('r', encoding='utf-8') as config_file:
+        payload = json.load(config_file)
+
+    if isinstance(payload, dict):
+        payload = payload.get('pluginCommonSettings')
+
+    return normalize_plugin_common_settings(payload, plugins=plugins)
+
+
+def save_plugin_common_settings(common_settings_path: Path | None, common_settings: dict[str, Any]) -> None:
+    if common_settings_path is None:
+        return
+
+    display_config = load_display_settings(common_settings_path)
+    save_display_settings(
+        common_settings_path,
+        display_config,
+        plugin_common_settings=common_settings,
+    )
 
 
 def normalize_schema_values(
@@ -513,6 +564,7 @@ def normalize_screens_payload(
                         plugin.manifest.design_schema,
                         section_name=f'screens[{index}].design',
                     ),
+                    'pluginState': previous_screen.get('pluginState', {}),
                     'cachedLines': cached_lines,
                     'lastRefreshedAt': previous_screen.get('lastRefreshedAt'),
                     'lastError': previous_screen.get('lastError'),
@@ -563,6 +615,7 @@ def reconcile_screens_for_config_change(
                     plugin.manifest.design_schema,
                     section_name=f"screen '{screen['id']}'.design",
                 ),
+                'pluginState': {},
                 'cachedLines': [],
                 'lastRefreshedAt': None,
                 'lastError': None,
@@ -628,6 +681,10 @@ def apply_runtime_display_config(config: DisplayConfig) -> dict[str, Any]:
     return config.serialize()
 
 
+def build_admin_config_response(config: DisplayConfig) -> dict[str, Any]:
+    return config.serialize_settings()
+
+
 def serialize_screen_for_admin(
     screen: dict[str, Any],
     config: DisplayConfig,
@@ -653,6 +710,7 @@ def serialize_screen_for_admin(
             'refreshIntervalSeconds': screen['refreshIntervalSeconds'],
             'settings': screen['settings'],
             'design': screen['design'],
+            'pluginState': screen.get('pluginState', {}),
             'lastRefreshedAt': screen.get('lastRefreshedAt'),
             'lastError': screen.get('lastError'),
         }
@@ -664,6 +722,7 @@ def build_admin_screens_response(app: web.Application) -> dict[str, Any]:
     config = app[DISPLAY_CONFIG_KEY]
     plugins = app[PLUGINS_KEY]
     return {
+        'pluginCommonSettings': app[SCREEN_STATE_KEY].common_settings,
         'screens': [
             serialize_screen_for_admin(screen, config, plugins)
             for screen in app[SCREEN_STATE_KEY].screens
@@ -848,6 +907,11 @@ async def refresh_plugin_screen(
             design=screen['design'],
             context=PluginContext(cols=config.cols, rows=config.rows),
             http_session=app[PLUGIN_HTTP_SESSION_KEY],
+            previous_state=screen.get('pluginState'),
+            common_settings=app[SCREEN_STATE_KEY].common_settings.get(
+                plugin.manifest.common_settings_namespace,
+                {},
+            ),
         )
         screen['cachedLines'] = normalize_message_lines(
             result.lines,
@@ -855,9 +919,11 @@ async def refresh_plugin_screen(
             rows=config.rows,
             field_name=f"plugin screen '{screen_id}'",
         )
+        screen['pluginState'] = result.meta.copy()
         screen['lastRefreshedAt'] = _utc_now()
         screen['lastError'] = None
     except Exception as exc:
+        screen['pluginState'] = screen.get('pluginState', {})
         screen['lastError'] = str(exc)
 
     save_screens(app[SCREENS_PATH_KEY], app[SCREEN_STATE_KEY].screens)
@@ -990,7 +1056,7 @@ async def admin_session_delete(request: web.Request) -> web.Response:
 async def admin_config_get(request: web.Request) -> web.Response:
     require_admin(request)
     sync_display_messages(request.app)
-    return web.json_response(apply_runtime_display_config(request.app[DISPLAY_CONFIG_KEY]))
+    return web.json_response(build_admin_config_response(request.app[DISPLAY_CONFIG_KEY]))
 
 
 async def admin_config_put(request: web.Request) -> web.Response:
@@ -1018,7 +1084,11 @@ async def admin_config_put(request: web.Request) -> web.Response:
     current_config.api_message_duration_seconds = api_message_duration_seconds
     request.app[SCREEN_STATE_KEY].screens = reconciled_screens
 
-    save_display_settings(request.app[CONFIG_PATH_KEY], current_config)
+    save_display_settings(
+        request.app[CONFIG_PATH_KEY],
+        current_config,
+        plugin_common_settings=request.app[SCREEN_STATE_KEY].common_settings,
+    )
     save_screens(request.app[SCREENS_PATH_KEY], request.app[SCREEN_STATE_KEY].screens)
 
     await refresh_all_plugin_screens(request.app, broadcast=False)
@@ -1026,7 +1096,7 @@ async def admin_config_put(request: web.Request) -> web.Response:
     await clear_override(request.app)
     await broadcast_display_config(request.app)
 
-    return web.json_response(apply_runtime_display_config(current_config))
+    return web.json_response(build_admin_config_response(current_config))
 
 
 async def admin_screens_get(request: web.Request) -> web.Response:
@@ -1054,11 +1124,17 @@ async def admin_screens_put(request: web.Request) -> web.Response:
             plugins=request.app[PLUGINS_KEY],
             existing_screens=existing_screens,
         )
+        common_settings = normalize_plugin_common_settings(
+            payload.get('pluginCommonSettings'),
+            plugins=request.app[PLUGINS_KEY],
+        )
     except ValueError as exc:
         return _json_error(str(exc))
 
     request.app[SCREEN_STATE_KEY].screens = normalized_screens
+    request.app[SCREEN_STATE_KEY].common_settings = common_settings
     save_screens(request.app[SCREENS_PATH_KEY], normalized_screens)
+    save_plugin_common_settings(request.app[CONFIG_PATH_KEY], common_settings)
 
     await refresh_all_plugin_screens(request.app, broadcast=False)
     restart_plugin_refresh_tasks(request.app)
@@ -1177,19 +1253,22 @@ def create_app(
     admin_password: str | None = None,
     config_path: Path | None = CONFIG_PATH,
     screens_path: Path | None = SCREENS_PATH,
-    messages_path: Path | None = LEGACY_MESSAGES_PATH,
     plugins: dict[str, ScreenPlugin] | None = None,
 ) -> web.Application:
     plugin_registry = plugins or load_plugins()
-    display_config, legacy_default_messages = load_display_settings(config_path)
+    display_config = load_display_settings(config_path)
+    loaded_screens = load_screens(
+        screens_path,
+        config=display_config,
+        plugins=plugin_registry,
+    )
+    loaded_common_settings = load_plugin_common_settings(
+        config_path,
+        plugins=plugin_registry,
+    )
     screen_state = ScreenState(
-        screens=load_screens(
-            screens_path,
-            legacy_messages_path=messages_path,
-            legacy_default_messages=legacy_default_messages,
-            config=display_config,
-            plugins=plugin_registry,
-        )
+        screens=loaded_screens,
+        common_settings=loaded_common_settings,
     )
     display_config.default_messages = resolve_default_messages(
         screen_state.screens,
@@ -1209,7 +1288,6 @@ def create_app(
     app[SESSION_TOKENS_KEY] = set()
     app[CONFIG_PATH_KEY] = config_path
     app[SCREENS_PATH_KEY] = screens_path
-    app[LEGACY_MESSAGES_PATH_KEY] = messages_path
     app[PLUGINS_KEY] = plugin_registry
     app[OVERRIDE_TASK_KEY] = OverrideTaskState()
 

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from .base import (
+from ..base import (
     PluginContext,
     PluginField,
     PluginManifest,
     PluginRefreshResult,
     ScreenPlugin,
 )
-from .github_common import (
+from .lib.common import (
     DEFAULT_GITHUB_REPOSITORY,
     compact_repository,
     count_open_pull_requests,
@@ -50,6 +50,8 @@ class GitHubOpenWorkPlugin(ScreenPlugin):
         design,
         context: PluginContext,
         http_session,
+        previous_state=None,
+        common_settings=None,
     ) -> PluginRefreshResult:
         owner, repo = normalize_repository(settings.get('repository'))
         repository_payload = await fetch_repository(owner, repo, http_session)
@@ -60,28 +62,24 @@ class GitHubOpenWorkPlugin(ScreenPlugin):
         except (TypeError, ValueError):
             open_issues = 0
 
-        title = str(design.get('title') or 'OPEN WORK').strip().upper()
         repo_label = compact_repository(owner, repo).upper()
 
-        lines = [
-            self._fit(title, context.cols),
+        lines = self.with_optional_title([
             self._fit(repo_label, context.cols),
             self._fit(f'ISSUE {open_issues}', context.cols),
             self._fit(f'PR {open_prs}', context.cols),
-        ]
+        ], design=design, context=context)
 
         return PluginRefreshResult(lines=lines[: context.rows])
 
     def placeholder_lines(self, *, settings, design, context: PluginContext, error=None):
         owner, repo = normalize_repository(settings.get('repository'))
-        title = str(design.get('title') or 'OPEN WORK').strip().upper()
         detail = (error or compact_repository(owner, repo)).upper()
-        return [
-            self._fit(title, context.cols),
+        return self.with_optional_title([
             self._fit(detail, context.cols),
             self._fit('ISSUE --', context.cols),
             self._fit('PR --', context.cols),
-        ][: context.rows]
+        ], design=design, context=context)[: context.rows]
 
     def _fit(self, value: str, cols: int) -> str:
         return value[:cols]
