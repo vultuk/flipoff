@@ -1,4 +1,4 @@
-export const GRID_COLS = 22;
+export const GRID_COLS = 18;
 export const GRID_ROWS = 5;
 
 export const SCRAMBLE_DURATION = 800;
@@ -45,8 +45,8 @@ export const MESSAGES = [
     '',
     'LESS IS MORE',
     '',
-    '- MIES VAN DER ROHE',
-    ''
+    '- MIES VAN DER',
+    'ROHE'
   ],
   [
     '',
